@@ -1,0 +1,346 @@
+from Adafruit_AMG88xx import Adafruit_AMG88xx
+import pygame
+import os
+import math
+import signal
+import sys
+import RPi.GPIO as GPIO
+import time
+from threading import Thread
+
+import numpy as np
+from scipy.interpolate import griddata
+
+from colour import Color
+
+#low range of the sensor (this will be blue on the screen)
+MINTEMP = 26
+
+#high range of the sensor (this will be red on the screen)
+MAXTEMP = 32
+
+global running
+running = True
+
+
+#how many color values we can have
+COLORDEPTH = 1024
+
+os.putenv('SDL_FBDEV', '/dev/fb1')
+pygame.init()
+
+#initialize the sensor
+sensor = Adafruit_AMG88xx()
+
+points = [(math.floor(ix / 8), (ix % 8)) for ix in range(0, 64)]
+grid_x, grid_y = np.mgrid[0:7:32j, 0:7:32j]
+
+#sensor is an 8x8 grid so lets do a square
+height = 1000
+width = 800
+
+#the list of colors we can choose from
+blue = Color("indigo")
+colors = list(blue.range_to(Color("red"), COLORDEPTH))
+
+#create the array of colors
+colors = [(int(c.red * 255), int(c.green * 255), int(c.blue * 255)) for c in colors]
+
+displayPixelWidth = width / 30
+displayPixelHeight = height / 40
+
+lcd = pygame.display.set_mode((width, height))
+
+lcd.fill((255,0,0))
+
+pygame.display.update()
+pygame.mouse.set_visible(False)
+
+lcd.fill((0,0,0))
+pygame.display.update()
+
+#some utility functions
+def constrain(val, min_val, max_val):
+    return min(max_val, max(min_val, val))
+
+def map(x, in_min, in_max, out_min, out_max):
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
+
+#let the sensor initialize
+time.sleep(.1)
+
+def func(bogus):
+	global running
+	while(running):
+	
+		#read the pixels
+		pixels = sensor.readPixels()
+		pixels = [map(p, MINTEMP, MAXTEMP, 0, COLORDEPTH - 1) for p in pixels]
+		
+		#perdorm interpolation
+		bicubic = griddata(points, pixels, (grid_x, grid_y), method='cubic')
+		
+		#draw everything
+		for ix, row in enumerate(bicubic):
+			for jx, pixel in enumerate(row-1):
+				pygame.draw.rect(lcd, colors[constrain(int(pixel), 0, COLORDEPTH- 1)], (displayPixelHeight * ix , displayPixelWidth * jx, displayPixelHeight, displayPixelWidth))
+		
+		
+		pygame.display.update()
+def func3(bogus):
+	moveforward=False
+	movebackward=False
+	global running
+	
+	while(running):
+		
+		events = pygame.event.get()
+		for event in events:
+			if event.type == pygame.KEYDOWN:
+			
+				if event.key == pygame.K_UP:
+					moveforward = True
+				if event.key == pygame.K_DOWN:
+					movebackward = True
+		if (moveforward == True):
+			moveforward = False
+			delay = 0.0055
+			steps = 50
+			
+			GPIO.setmode(GPIO.BCM)
+	
+			
+			# Enable GPIO pins for  ENA and ENB for stepper
+			
+			enable_a = 18
+			enable_b = 22
+			
+			# Enable pins for IN1-4 to control step sequence
+			
+			coil_A_1_pin = 21
+			coil_A_2_pin = 20
+			coil_B_1_pin = 16
+			coil_B_2_pin = 12
+			
+			# Set pin states
+	
+			GPIO.setup(enable_a, GPIO.OUT)
+			GPIO.setup(enable_b, GPIO.OUT)
+			GPIO.setup(coil_A_1_pin, GPIO.OUT)
+			GPIO.setup(coil_A_2_pin, GPIO.OUT)
+			GPIO.setup(coil_B_1_pin, GPIO.OUT)
+			GPIO.setup(coil_B_2_pin, GPIO.OUT)
+			
+			# Set ENA and ENB to high to enable stepper
+			
+			GPIO.output(enable_a, True)
+			GPIO.output(enable_b, True)
+			
+			# Function for step sequence
+			
+			def setStep(w1, w2, w3, w4):
+				GPIO.setmode(GPIO.BCM)
+				GPIO.setup(coil_A_1_pin, GPIO.OUT)
+				GPIO.setup(coil_A_2_pin, GPIO.OUT)
+				GPIO.setup(coil_B_1_pin, GPIO.OUT)
+				GPIO.setup(coil_B_2_pin, GPIO.OUT)
+				GPIO.output(coil_A_1_pin, w1)
+				GPIO.output(coil_A_2_pin, w2)
+				GPIO.output(coil_B_1_pin, w3)
+				GPIO.output(coil_B_2_pin, w4)
+			
+			# loop through step sequence based on number of steps
+			
+			for i in range(0, steps):
+				setStep(1,0,1,0)
+				time.sleep(delay)
+				setStep(0,1,1,0)
+				time.sleep(delay)
+				setStep(0,1,0,1)
+				time.sleep(delay)
+				setStep(1,0,0,1)
+				time.sleep(delay)
+			#GPIO.cleanup()
+		if (movebackward == True):
+			movebackward = False
+			delay = 0.0055
+			steps = 50
+			
+			GPIO.setmode(GPIO.BCM)
+	
+			
+			# Enable GPIO pins for  ENA and ENB for stepper
+			
+			enable_a = 18
+			enable_b = 22
+			
+			# Enable pins for IN1-4 to control step sequence
+			
+			coil_A_1_pin = 21
+			coil_A_2_pin = 20
+			coil_B_1_pin = 16
+			coil_B_2_pin = 12
+			
+			# Set pin states
+	
+			GPIO.setup(enable_a, GPIO.OUT)
+			GPIO.setup(enable_b, GPIO.OUT)
+			GPIO.setup(coil_A_1_pin, GPIO.OUT)
+			GPIO.setup(coil_A_2_pin, GPIO.OUT)
+			GPIO.setup(coil_B_1_pin, GPIO.OUT)
+			GPIO.setup(coil_B_2_pin, GPIO.OUT)
+			
+			# Set ENA and ENB to high to enable stepper
+			
+			GPIO.output(enable_a, True)
+			GPIO.output(enable_b, True)
+			
+			# Function for step sequence
+			
+			def setStep(w1, w2, w3, w4):
+				GPIO.setmode(GPIO.BCM)
+				GPIO.setup(coil_A_1_pin, GPIO.OUT)
+				GPIO.setup(coil_A_2_pin, GPIO.OUT)
+				GPIO.setup(coil_B_1_pin, GPIO.OUT)
+				GPIO.setup(coil_B_2_pin, GPIO.OUT)
+				GPIO.output(coil_A_1_pin, w1)
+				GPIO.output(coil_A_2_pin, w2)
+				GPIO.output(coil_B_1_pin, w3)
+				GPIO.output(coil_B_2_pin, w4)
+			
+			# loop through step sequence based on number of steps
+			
+			for i in range(0, steps):
+				setStep(1,0,0,1)
+				time.sleep(delay)
+				setStep(0,1,0,1)
+				time.sleep(delay)
+				setStep(0,1,1,0)
+				time.sleep(delay)
+				setStep(1,0,1,0)
+				time.sleep(delay)
+			GPIO.cleanup([18, 22, 21, 20, 16, 12])
+			
+		time.sleep(2)
+def func4(bogus):
+	angle=7.5
+	global running
+	move = False;
+	while(running):
+		events = pygame.event.get()
+		for event in events:
+			if event.type == pygame.KEYDOWN:
+			
+				if event.key == pygame.K_LEFT:
+					move = True
+					angle=angle+1
+					if(angle>12):
+						angle=11
+				if event.key == pygame.K_RIGHT:
+					move = True
+					angle=angle-1
+					if(angle==0):
+						angle=1
+		if(move==True):
+			move=False
+			
+			GPIO.setmode(GPIO.BCM)
+			GPIO.setup(25,GPIO.OUT)
+			p = GPIO.PWM(25, 50)
+			
+			p.start(7.5)
+			
+			
+			p.ChangeDutyCycle(angle)  # turn towards 90 degree
+			time.sleep(1) # sleep 1 second
+			GPIO.cleanup([25])
+		time.sleep(2)
+
+def func2(bogus):
+	i=0
+	global running
+	while(running):
+		GPIO.setmode(GPIO.BCM)
+		TRIG = 23 
+		TRIG2 = 13 
+		ECHO = 24
+		ECHO2 = 5
+		
+		print "Distance Measurement In Progress"
+		
+		GPIO.setup(TRIG,GPIO.OUT)
+		GPIO.setup(TRIG2,GPIO.OUT)
+		GPIO.setup(ECHO,GPIO.IN)
+		GPIO.setup(ECHO2,GPIO.IN)
+		
+		GPIO.output(TRIG, False)
+		print "Waiting For Sensor To Settle"
+		time.sleep(1)
+		
+		GPIO.output(TRIG, True)
+		time.sleep(0.00001)
+		GPIO.output(TRIG, False)
+		
+		while GPIO.input(ECHO)==0:
+		  pulse_start = time.time()
+		
+		while GPIO.input(ECHO)==1:
+		  pulse_end = time.time()
+		
+		GPIO.output(TRIG2, True)
+		time.sleep(0.00001)
+		GPIO.output(TRIG2, False)
+		
+		while GPIO.input(ECHO2)==0:
+		  pulse_start_2 = time.time()
+		
+		while GPIO.input(ECHO2)==1:
+		  pulse_end_2 = time.time()
+		
+		pulse_duration = pulse_end - pulse_start
+		pulse_duration_2 = pulse_end_2 - pulse_start_2
+		
+		distance = pulse_duration * 17150
+		
+		distance = round(distance, 2)
+		distance_2 = pulse_duration_2 * 17150
+		
+		distance_2 = round(distance_2, 2)
+		
+		print "Distance:",distance,"cm"
+		print "Distance2:",distance_2,"cm"
+		
+		GPIO.cleanup([23,13,24,5])
+		font = pygame.font.Font(None, 80)
+		text = str(distance)
+		size = font.size(text)
+		fg = 10, 10, 10
+		bg = 100, 100, 100
+		#no AA, no transparancy, normal
+		ren = font.render(text, 0, fg, bg)
+		lcd.blit(ren, (0, 850))
+		text = str(distance_2)
+		text_width, text_height = font.size(text)
+		ren = font.render(text, 0, fg, bg)
+		lcd.blit(ren, (800-text_width, 850))
+		pygame.display.update()
+		time.sleep(1)
+def signal_handler(signal, frame):
+        print('You pressed Ctrl+C!')
+	global running
+	running = False
+        sys.exit(0)
+	
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+print('Press Ctrl+C')
+
+t = Thread(target=func, args=(1,))
+t.start()
+t2 = Thread(target=func2, args=(1,))
+t2.start()
+t3 = Thread(target=func3, args=(1,))
+t3.start()
+t4 = Thread(target=func4, args=(1,))
+t4.start()
+signal.pause()
